@@ -1,0 +1,74 @@
+﻿using ZipListing;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddOpenApi();
+builder.Services.AddSingleton<ListingJsonLoader>();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseHttpsRedirection();
+
+var summaries = new[]
+{
+    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+};
+
+app.MapGet("/weatherforecast", () =>
+{
+    var forecast = Enumerable.Range(1, 5).Select(index => new WeatherForecast
+    {
+        Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
+        TemperatureC = Random.Shared.Next(-20, 55),
+        Summary = summaries[Random.Shared.Next(summaries.Length)]
+    })
+    .ToArray();
+
+    return forecast;
+})
+.WithName("GetWeatherForecast");
+
+app.MapGet("/listings", async (int page, ListingJsonLoader loader, CancellationToken cancellationToken) =>
+{
+    if (page < 1)
+    {
+        return Results.BadRequest("Page must be greater than or equal to 1.");
+    }
+
+    const int pageSize = 3;
+    var listings = await loader.LoadAsync(cancellationToken);
+    var totalCount = listings.Count;
+    var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+    var items = listings
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .ToArray();
+
+    return Results.Ok(new
+    {
+        page,
+        pageSize,
+        totalCount,
+        totalPages,
+        items
+    });
+})
+.WithName("GetListings");
+
+app.MapGet("/listings/{id}", async (string id, ListingJsonLoader loader, CancellationToken cancellationToken) =>
+{
+    var listings = await loader.LoadAsync(cancellationToken);
+    var listing = listings.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    return listing is null ? Results.NotFound() : Results.Ok(listing);
+})
+.WithName("GetListingById");
+
+app.Run();

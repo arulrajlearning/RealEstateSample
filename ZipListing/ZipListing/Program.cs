@@ -1,0 +1,158 @@
+using ZipListing;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddOpenApi();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ZipXCors", policy =>
+    {
+        policy
+            .WithOrigins("http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+builder.Services.AddSingleton<ListingJsonLoader>();
+builder.Services.AddSingleton<ListingRelevanceScorer>();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseHttpsRedirection();
+app.UseCors("ZipXCors");
+
+var summaries = new[]
+{
+    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+};
+
+app.MapGet("/weatherforecast", () =>
+{
+    var forecast = Enumerable.Range(1, 5).Select(index => new WeatherForecast
+    {
+        Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
+        TemperatureC = Random.Shared.Next(-20, 55),
+        Summary = summaries[Random.Shared.Next(summaries.Length)]
+    })
+    .ToArray();
+
+    return forecast;
+})
+.WithName("GetWeatherForecast");
+
+app.MapGet("/listings", async (
+    ListingJsonLoader loader,
+    ListingRelevanceScorer relevanceScorer,
+    CancellationToken cancellationToken,
+    int page = 1,
+    decimal? minPrice = null,
+    decimal? maxPrice = null,
+    int? minBedrooms = null,
+    string? city = null,
+    string? keyword = null,
+    decimal? targetBudget = null) =>
+{
+    if (page < 1)
+    {
+        return Results.BadRequest("Page must be greater than or equal to 1.");
+    }
+
+    if (minPrice.HasValue && maxPrice.HasValue && minPrice > maxPrice)
+    {
+        return Results.BadRequest("minPrice cannot be greater than maxPrice.");
+    }
+
+    if (minBedrooms.HasValue && minBedrooms < 0)
+    {
+        return Results.BadRequest("minBedrooms must be greater than or equal to 0.");
+    }
+
+    if (targetBudget.HasValue && targetBudget <= 0)
+    {
+        return Results.BadRequest("targetBudget must be greater than 0.");
+    }
+
+    const int pageSize = 3;
+    var listings = await loader.LoadAsync(cancellationToken);
+    var filteredListings = listings.AsEnumerable();
+
+    if (minPrice.HasValue)
+    {
+        filteredListings = filteredListings.Where(x => x.Price >= minPrice.Value);
+    }
+
+    if (maxPrice.HasValue)
+    {
+        filteredListings = filteredListings.Where(x => x.Price <= maxPrice.Value);
+    }
+
+    if (minBedrooms.HasValue)
+    {
+        filteredListings = filteredListings.Where(x => x.Bedrooms >= minBedrooms.Value);
+    }
+
+    if (!string.IsNullOrWhiteSpace(city))
+    {
+        filteredListings = filteredListings.Where(x => string.Equals(x.City, city, StringComparison.OrdinalIgnoreCase));
+    }
+
+    if (!string.IsNullOrWhiteSpace(keyword))
+    {
+        filteredListings = filteredListings.Where(x =>
+            !string.IsNullOrWhiteSpace(x.Description)
+            && x.Description.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    var filteredArray = filteredListings.ToArray();
+    var referenceDate = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    if (targetBudget.HasValue)
+    {
+        filteredArray = filteredArray
+            .OrderByDescending(x => relevanceScorer.CalculateScore(x, targetBudget.Value, referenceDate))
+            .ToArray();
+    }
+
+    var totalCount = filteredArray.Length;
+    var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+    var items = filteredArray
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .Select(x => new
+        {
+            listing = x,
+            score = targetBudget.HasValue
+                ? relevanceScorer.CalculateScore(x, targetBudget.Value, referenceDate)
+                : (double?)null
+        })
+        .ToArray();
+
+    return Results.Ok(new
+    {
+        page,
+        pageSize,
+        targetBudget,
+        totalCount,
+        totalPages,
+        items
+    });
+})
+.WithName("GetListings");
+
+app.MapGet("/listings/{id}", async (string id, ListingJsonLoader loader, CancellationToken cancellationToken) =>
+{
+    var listings = await loader.LoadAsync(cancellationToken);
+    var listing = listings.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    return listing is null ? Results.NotFound() : Results.Ok(listing);
+})
+.WithName("GetListingById");
+
+app.Run();

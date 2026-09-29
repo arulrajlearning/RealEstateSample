@@ -1,0 +1,26 @@
+﻿@ZipListing_HostAddress = http://localhost:5197
+
+GET {{ZipListing_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
+
+GET {{ZipListing_HostAddress}}/listings?page=1
+Accept: application/json
+
+###
+
+GET {{ZipListing_HostAddress}}/listings?page=2
+Accept: application/json
+
+###
+
+GET {{ZipListing_HostAddress}}/listings?page=1&minPrice=450000&maxPrice=600000&minBedrooms=3&city=Reston&keyword=pets
+Accept: application/json
+
+###
+
+GET {{ZipListing_HostAddress}}/listings/A4
+Accept: application/json
+
+###

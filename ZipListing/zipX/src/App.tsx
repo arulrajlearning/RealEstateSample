@@ -1,0 +1,180 @@
+import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
+import { apiBaseUrl } from './config'
+import './App.css'
+
+type Listing = {
+  id: string
+  source: string
+  address: string
+  city: string
+  state: string
+  zip: string
+  price: number
+  bedrooms: number
+  bathrooms: number
+  sqft: number
+  listedDate: string
+  status: string
+  description?: string | null
+}
+
+type ListingItem = {
+  listing: Listing
+  score: number | null
+}
+
+type ListingsResponse = {
+  page: number
+  pageSize: number
+  targetBudget: number | null
+  totalCount: number
+  totalPages: number
+  items: ListingItem[]
+}
+
+function App() {
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
+  const [minBedrooms, setMinBedrooms] = useState('')
+  const [city, setCity] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [targetBudget, setTargetBudget] = useState('')
+
+  const [response, setResponse] = useState<ListingsResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const fetchListings = async (page: number) => {
+    setLoading(true)
+    setError('')
+
+    try {
+      const query = new URLSearchParams({ page: page.toString() })
+
+      if (minPrice.trim()) query.set('minPrice', minPrice.trim())
+      if (maxPrice.trim()) query.set('maxPrice', maxPrice.trim())
+      if (minBedrooms.trim()) query.set('minBedrooms', minBedrooms.trim())
+      if (city.trim()) query.set('city', city.trim())
+      if (keyword.trim()) query.set('keyword', keyword.trim())
+      if (targetBudget.trim()) query.set('targetBudget', targetBudget.trim())
+
+      const result = await fetch(`${apiBaseUrl}/listings?${query.toString()}`)
+
+      if (!result.ok) {
+        const message = await result.text()
+        throw new Error(message || 'Failed to load listings')
+      }
+
+      const json = (await result.json()) as ListingsResponse
+      setResponse(json)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      setError(message)
+      setResponse(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSearch = async (event: FormEvent) => {
+    event.preventDefault()
+    await fetchListings(1)
+  }
+
+  useEffect(() => {
+    void fetchListings(1)
+  }, [])
+
+  return (
+    <main className="page">
+      <h1>zipX Listings Search</h1>
+
+      <form className="search-form" onSubmit={(event) => void handleSearch(event)}>
+        <div className="grid">
+          <label>
+            Min Price
+            <input value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
+          </label>
+          <label>
+            Max Price
+            <input value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
+          </label>
+          <label>
+            Min Bedrooms
+            <input value={minBedrooms} onChange={(e) => setMinBedrooms(e.target.value)} />
+          </label>
+          <label>
+            City
+            <input value={city} onChange={(e) => setCity(e.target.value)} />
+          </label>
+          <label>
+            Keyword
+            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+          </label>
+          <label>
+            Target Budget
+            <input value={targetBudget} onChange={(e) => setTargetBudget(e.target.value)} />
+          </label>
+        </div>
+        <button type="submit" disabled={loading}>
+          {loading ? 'Searching...' : 'Search'}
+        </button>
+      </form>
+
+      {error && <p className="error">{error}</p>}
+
+      {response && (
+        <>
+          <div className="meta">
+            <span>Total: {response.totalCount}</span>
+            <span>
+              Page: {response.page} / {Math.max(response.totalPages, 1)}
+            </span>
+          </div>
+
+          <div className="row header">
+            <span>Id</span>
+            <span>City</span>
+            <span>Price</span>
+            <span>Beds</span>
+            <span>Listed</span>
+            <span>Score</span>
+            <span>Description</span>
+          </div>
+
+          {response.items.map((item) => (
+            <div className="row" key={item.listing.id}>
+              <span>{item.listing.id}</span>
+              <span>{item.listing.city}</span>
+              <span>${item.listing.price.toLocaleString()}</span>
+              <span>{item.listing.bedrooms}</span>
+              <span>{item.listing.listedDate}</span>
+              <span>{item.score?.toFixed(3) ?? '-'}</span>
+              <span>{item.listing.description ?? '-'}</span>
+            </div>
+          ))}
+
+          <div className="pager">
+            <button
+              type="button"
+              disabled={loading || response.page <= 1}
+              onClick={() => void fetchListings(response.page - 1)}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={loading || response.page >= response.totalPages}
+              onClick={() => void fetchListings(response.page + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </>
+      )}
+    </main>
+  )
+}
+
+export default App
